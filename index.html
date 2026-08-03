@@ -526,7 +526,6 @@
     const BACK4APP_JS_KEY = "byBfXw4lc8QrxfDxzscc6KoH0oejmLubmusyGowa";
     const VAPID_PUBLIC_KEY = "BA8NXZjt4Aj2NsNFZwFQJPvNHoGdz87nVB_0MJCQdbXFMhgOmkWsd-STbCKtgPIBPrWF7-Umqrili8Ef4xS352E";
 
-    // ALL SPORTS ENDPOINTS LIST
     const ALL_SPORTS_LEAGUES = [
       { sport: 'football', league: 'nfl' },
       { sport: 'basketball', league: 'nba' },
@@ -547,6 +546,59 @@
     let matchesDataCache = [];
     let cachedEventsList = [];
 
+    // HELPER: Normalize strings for fuzzy comparison
+    function normalizeText(str) {
+      if (!str) return '';
+      return str
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\b(fc|vs|the|team)\b/g, '')
+        .trim();
+    }
+
+    // RESTRUCTURED MATCHING ALGORITHM FOR STREAMED.PK
+    function findMatchingStream(homeTeam, awayTeam) {
+      if (!matchesDataCache || matchesDataCache.length === 0) return null;
+
+      const homeTokens = [
+        homeTeam?.displayName,
+        homeTeam?.name,
+        homeTeam?.shortDisplayName,
+        homeTeam?.abbreviation
+      ].map(normalizeText).filter(Boolean);
+
+      const awayTokens = [
+        awayTeam?.displayName,
+        awayTeam?.name,
+        awayTeam?.shortDisplayName,
+        awayTeam?.abbreviation
+      ].map(normalizeText).filter(Boolean);
+
+      let bestMatch = null;
+      let highestScore = 0;
+
+      for (const match of matchesDataCache) {
+        const titleNorm = normalizeText(match.title);
+        let currentScore = 0;
+
+        const homeFound = homeTokens.some(token => token.length > 2 && titleNorm.includes(token));
+        const awayFound = awayTokens.some(token => token.length > 2 && titleNorm.includes(token));
+
+        if (homeFound && awayFound) {
+          currentScore = 10;
+        } else if (homeFound || awayFound) {
+          currentScore = 4;
+        }
+
+        if (currentScore > highestScore) {
+          highestScore = currentScore;
+          bestMatch = match;
+        }
+      }
+
+      return highestScore >= 4 ? bestMatch : null;
+    }
+
     // HELPER: Format Date Object to YYYYMMDD string for ESPN API
     function formatDateForESPN(dateObj) {
       const yyyy = dateObj.getFullYear();
@@ -561,14 +613,12 @@
       checkPWAContext();
       fetchScoreboard();
       
-      // Strict 4-Minute Interval Polling (240,000 ms) for cards with alerts enabled
       setInterval(() => {
         if (alertSelectedGames.size > 0) {
           fetchScoreboard();
         }
       }, 240000);
 
-      // Ticker every 60 seconds to update live countdown timers on cards
       setInterval(() => {
         if (cachedEventsList.length > 0) {
           renderCards(cachedEventsList);
@@ -683,8 +733,6 @@
         ]);
 
         matchesDataCache = streamRes;
-        
-        // Flatten aggregated events across all sports
         const aggregatedEvents = eventsResults.flat();
         cachedEventsList = aggregatedEvents;
         
@@ -725,7 +773,6 @@
         return;
       }
 
-      // Sorting: Pinned first, active games next, completed/final games rotated to bottom
       events.sort((a, b) => {
         const aPinned = pinnedGames.has(a.id) ? 1 : 0;
         const bPinned = pinnedGames.has(b.id) ? 1 : 0;
@@ -752,7 +799,6 @@
         const homeScore = parseInt(home.score || '0');
         const awayScore = parseInt(away.score || '0');
 
-        // Status display with dynamic countdown timer (No "Scheduled" word)
         let statusDisplay = '';
         if (isCompleted) {
           statusDisplay = 'FINAL';
@@ -819,8 +865,8 @@
       fetchScoreboard();
     }
 
-    // MODAL PLAYER AND DETAILS (75/25 SPLIT)
-    function openModal(event, competition) {
+    // MODAL PLAYER AND DETAILS (RESTRUCTURED LINKAGE)
+    async function openModal(event, competition) {
       const modal = document.getElementById('streamModal');
       const title = document.getElementById('modalTitle');
       const details = document.getElementById('modalDetails');
@@ -829,13 +875,11 @@
       const home = competition.competitors?.find(c => c.homeAway === 'home') || competition.competitors?.[0];
       const away = competition.competitors?.find(c => c.homeAway === 'away') || competition.competitors?.[1];
 
-      title.innerText = `${home?.team?.displayName || 'TBD'} vs ${away?.team?.displayName || 'TBD'}`;
+      const homeName = home?.team?.displayName || 'Home Team';
+      const awayName = away?.team?.displayName || 'Away Team';
 
-      // Find matching stream from streamed.pk cache
-      const matchedStream = matchesDataCache.find(m => 
-        home?.team?.name && m.title.toLowerCase().includes(home.team.name.toLowerCase()) || 
-        away?.team?.name && m.title.toLowerCase().includes(away.team.name.toLowerCase())
-      );
+      title.innerText = `${homeName} vs ${awayName}`;
+      player.src = "about:blank";
 
       details.innerHTML = `
         <div class="stat-box">
@@ -856,28 +900,41 @@
         <div class="stat-box">
           <div class="stat-label">Available Stream Sources</div>
           <div class="sources-list" id="sourcesList">
-            ${matchedStream && matchedStream.sources ? '' : '<span>No direct stream link found</span>'}
+            <span style="color:var(--text-muted);">Searching for active streams...</span>
           </div>
         </div>
       `;
 
-      if (matchedStream && matchedStream.sources) {
-        const sourcesContainer = document.getElementById('sourcesList');
-        matchedStream.sources.forEach(src => {
+      modal.classList.add('active');
+
+      let matchedStream = findMatchingStream(home?.team, away?.team);
+
+      if (!matchedStream) {
+        try {
+          const freshStreams = await fetch('https://streamed.pk/api/matches/live').then(r => r.json());
+          matchesDataCache = freshStreams || [];
+          matchedStream = findMatchingStream(home?.team, away?.team);
+        } catch (e) {
+          console.warn("Live stream fallback fetch failed", e);
+        }
+      }
+
+      const sourcesContainer = document.getElementById('sourcesList');
+
+      if (matchedStream && matchedStream.sources && matchedStream.sources.length > 0) {
+        sourcesContainer.innerHTML = '';
+        matchedStream.sources.forEach((src) => {
           const btn = document.createElement('button');
           btn.className = 'source-btn';
-          btn.innerText = `Source ${src.source.toUpperCase()}`;
+          btn.innerText = `Source ${src.source.toUpperCase()} (${src.hd ? 'HD' : 'SD'})`;
           btn.onclick = () => loadStreamSource(src.source, src.id);
           sourcesContainer.appendChild(btn);
         });
-        
-        // Auto load first source
+
         loadStreamSource(matchedStream.sources[0].source, matchedStream.sources[0].id);
       } else {
-        player.src = "about:blank";
+        sourcesContainer.innerHTML = `<span style="color:var(--accent-red); font-size:0.85rem;">No active stream sources online for this game right now.</span>`;
       }
-
-      modal.classList.add('active');
     }
 
     async function loadStreamSource(source, id) {
