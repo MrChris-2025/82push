@@ -502,169 +502,6 @@
 
   <script src="streamed.js"></script>
 
-  <!-- Minimal non-invasive helper: inserted here ONLY -->
-  <script>
-  (function() {
-    // small, defensive helper that does NOT modify streamed.js or VAPID keys
-    function urlBase64ToUint8Array(base64String) {
-      try {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-        return outputArray;
-      } catch (e) {
-        console.warn('VAPID conversion failed', e);
-        return null;
-      }
-    }
-
-    function generateInstallationId() {
-      let id = localStorage.getItem('parse_installation_id');
-      if (!id) {
-        id = 'inst-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-        localStorage.setItem('parse_installation_id', id);
-      }
-      return id;
-    }
-
-    function getBack4AppKeys() {
-      const appId = (typeof BACK4APP_APP_ID !== 'undefined') ? BACK4APP_APP_ID : (window.BACK4APP_APP_ID || null);
-      const jsKey = (typeof BACK4APP_JS_KEY !== 'undefined') ? BACK4APP_JS_KEY : (window.BACK4APP_JS_KEY || null);
-      return { appId, jsKey };
-    }
-
-    async function getOrCreateSubscription() {
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
-      const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) {
-        const vapid = (typeof VAPID_PUBLIC_KEY !== 'undefined') ? VAPID_PUBLIC_KEY : window.VAPID_PUBLIC_KEY;
-        if (!vapid) { console.warn('Missing VAPID_PUBLIC_KEY'); return null; }
-        const applicationServerKey = urlBase64ToUint8Array(vapid);
-        if (!applicationServerKey) { console.warn('Invalid VAPID_PUBLIC_KEY conversion'); return null; }
-        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
-      }
-      return sub;
-    }
-
-    async function saveSubscriptionToParse(subscription, channels = []) {
-      const { appId, jsKey } = getBack4AppKeys();
-      if (!appId || !jsKey) { console.warn('Missing Back4App keys'); return null; }
-      const installationId = generateInstallationId();
-      const objectId = localStorage.getItem('push_objectId');
-
-      const body = {
-        subscription: subscription,
-        installationId: installationId,
-        platform: navigator.userAgent,
-        channels: channels
-      };
-
-      const base = 'https://parseapi.back4app.com/classes/PushSubscription';
-      const headers = {
-        'X-Parse-Application-Id': appId,
-        'X-Parse-JavaScript-Key': jsKey,
-        'Content-Type': 'application/json'
-      };
-
-      try {
-        if (objectId) {
-          const res = await fetch(`${base}/${objectId}`, { method: 'PUT', headers, body: JSON.stringify(body) });
-          if (res.ok) return objectId;
-        }
-        const createRes = await fetch(base, { method: 'POST', headers, body: JSON.stringify(body) });
-        const data = await createRes.json().catch(()=>null);
-        if (data && data.objectId) {
-          localStorage.setItem('push_objectId', data.objectId);
-          return data.objectId;
-        }
-      } catch (e) {
-        console.warn('saveSubscriptionToParse error', e);
-      }
-      return null;
-    }
-
-    async function updateChannelsOnParse(channels = []) {
-      const objectId = localStorage.getItem('push_objectId');
-      if (!objectId) return;
-      const { appId, jsKey } = getBack4AppKeys();
-      if (!appId || !jsKey) return;
-      try {
-        await fetch(`https://parseapi.back4app.com/classes/PushSubscription/${objectId}`, {
-          method: 'PUT',
-          headers: {
-            'X-Parse-Application-Id': appId,
-            'X-Parse-JavaScript-Key': jsKey,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ channels })
-        });
-      } catch (e) {
-        console.warn('updateChannelsOnParse error', e);
-      }
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      const pwaBtn = document.getElementById('pwaAlertBtn');
-      if (pwaBtn) {
-        pwaBtn.addEventListener('click', () => {
-          setTimeout(async () => {
-            try {
-              if (Notification.permission !== 'granted') return;
-              const sub = await getOrCreateSubscription();
-              if (!sub) return;
-              const channels = (typeof alertSelectedGames !== 'undefined' && alertSelectedGames instanceof Set) ? Array.from(alertSelectedGames) : [];
-              await saveSubscriptionToParse(sub, channels);
-            } catch (e) { console.warn('pwa helper error', e); }
-          }, 700);
-        }, { passive: true });
-      }
-
-      document.addEventListener('click', (ev) => {
-        try {
-          const t = ev.target;
-          if (!t) return;
-          if (t.classList && t.classList.contains('action-btn')) {
-            setTimeout(() => {
-              const channels = (typeof alertSelectedGames !== 'undefined' && alertSelectedGames instanceof Set) ? Array.from(alertSelectedGames) : [];
-              updateChannelsOnParse(channels);
-            }, 250);
-          }
-        } catch (e) {}
-      }, { passive: true });
-
-      if (typeof syncGameAlertToBack4App === 'function') {
-        const orig = syncGameAlertToBack4App;
-        window.syncGameAlertToBack4App = async function wrappedSync(gameId, isAlertActive) {
-          try { orig.apply(this, arguments); } catch (e) {}
-          try {
-            const { appId, jsKey } = getBack4AppKeys();
-            if (!appId || !jsKey) return;
-            const installationId = generateInstallationId();
-            await fetch('https://parseapi.back4app.com/classes/GameAlerts', {
-              method: 'POST',
-              headers: {
-                'X-Parse-Application-Id': appId,
-                'X-Parse-JavaScript-Key': jsKey,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                gameId: String(gameId),
-                alertActive: !!isAlertActive,
-                installationId: installationId,
-                timestamp: { "__type": "Date", "iso": new Date().toISOString() }
-              })
-            });
-          } catch (e) { console.warn('wrapped SyncGameAlert error', e); }
-        };
-      }
-    });
-  })();
-  </script>
-  <!-- End helper -->
-
   <script>
     const BACK4APP_APP_ID = "obf7aTUggazRscBY140M2kWTRbhcuiintFMuuh7M";
     const BACK4APP_JS_KEY = "byBfXw4lc8QrxfDxzscc6KoH0oejmLubmusyGowa";
@@ -706,6 +543,18 @@
       return id;
     }
 
+    // Convert VAPID base64 key to Uint8Array (for pushManager.subscribe)
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(err => {
@@ -713,8 +562,41 @@
         });
       }
 
+      // Restore saved selected games and push enabled state from localStorage
+      try {
+        const saved = localStorage.getItem('alertSelectedGames');
+        if (saved) {
+          const arr = JSON.parse(saved);
+          if (Array.isArray(arr)) arr.forEach(id => alertSelectedGames.add(id));
+        }
+      } catch (e) {
+        console.warn('restore alertSelectedGames error', e);
+      }
+
+      try {
+        const savedPush = localStorage.getItem('isPushEnabled');
+        if (savedPush === 'true') isPushEnabled = true;
+        else isPushEnabled = false;
+      } catch (e) {
+        isPushEnabled = false;
+      }
+
       setupDateScroller();
       initPushAlertButton();
+
+      // Update PWA button UI to reflect restored state
+      try {
+        const btn = document.getElementById('pwaAlertBtn');
+        const btnText = document.getElementById('btnText');
+        if (isPushEnabled) {
+          btn.classList.add('active');
+          if (btnText) btnText.innerText = 'Push Alerts Active';
+        } else {
+          btn.classList.remove('active');
+          if (btnText) btnText.innerText = 'Enable Push Alerts';
+        }
+      } catch (e) {}
+
       loadUserAlertsFromBack4App();
       fetchScoreboard();
       
@@ -729,6 +611,14 @@
           renderCards(cachedEventsList);
         }
       }, 60000);
+
+      // If we have a local push_objectId, try to update channels once on load
+      try {
+        const objId = localStorage.getItem('push_objectId');
+        if (objId && alertSelectedGames.size > 0) {
+          updateChannelsOnServer();
+        }
+      } catch (e) {}
     });
 
     function initPushAlertButton() {
@@ -748,41 +638,123 @@
           }
         }
         isPushEnabled = true;
+        try { localStorage.setItem('isPushEnabled', 'true'); } catch (e) {}
         btn.classList.add('active');
         btnText.innerText = 'Push Alerts Active';
       } else {
         isPushEnabled = false;
+        try { localStorage.setItem('isPushEnabled', 'false'); } catch (e) {}
         btn.classList.remove('active');
         btnText.innerText = 'Enable Push Alerts';
       }
     }
 
+    // Subscribe properly: convert VAPID key, keep full subscription, save to PushSubscription class
     async function subscribeUserToPush() {
-      if ('serviceWorker' in navigator) {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
         try {
           const reg = await navigator.serviceWorker.ready;
-          const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: VAPID_PUBLIC_KEY
-          });
 
-          await fetch('https://parseapi.back4app.com/classes/_Installation', {
-            method: 'POST',
-            headers: {
-              'X-Parse-Application-Id': BACK4APP_APP_ID,
-              'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              deviceType: 'web',
-              installationId: generateInstallationId(),
-              deviceToken: sub.endpoint,
-              channels: Array.from(alertSelectedGames)
-            })
-          });
+          // Use previously existing subscription if available
+          let sub = await reg.pushManager.getSubscription();
+
+          // Convert VAPID public key to Uint8Array and subscribe if needed
+          if (!sub) {
+            let applicationServerKey = null;
+            try {
+              applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+            } catch (e) {
+              console.warn('VAPID conversion error', e);
+            }
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey
+            });
+          }
+
+          if (!sub) {
+            console.warn('subscribeUserToPush: no subscription created');
+            return;
+          }
+
+          // Save full subscription to PushSubscription custom class
+          const installationId = generateInstallationId();
+          const body = {
+            subscription: sub,
+            installationId: installationId,
+            platform: navigator.userAgent,
+            channels: Array.from(alertSelectedGames)
+          };
+
+          // If we already have push_objectId, try update first
+          const existingObjectId = localStorage.getItem('push_objectId');
+          const headers = {
+            'X-Parse-Application-Id': BACK4APP_APP_ID,
+            'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
+            'Content-Type': 'application/json'
+          };
+          const baseUrl = 'https://parseapi.back4app.com/classes/PushSubscription';
+
+          if (existingObjectId) {
+            try {
+              const res = await fetch(`${baseUrl}/${existingObjectId}`, {
+                method: 'PUT',
+                headers,
+                body: JSON.stringify(body)
+              });
+              if (!res.ok) {
+                // if update fails, attempt to create a fresh object
+                localStorage.removeItem('push_objectId');
+              } else {
+                // success
+                return;
+              }
+            } catch (e) {
+              console.warn('update existing PushSubscription failed', e);
+            }
+          }
+
+          // Create new PushSubscription row
+          try {
+            const res = await fetch(baseUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(()=>null);
+            if (data && data.objectId) {
+              localStorage.setItem('push_objectId', data.objectId);
+            } else {
+              console.warn('push subscription create returned no objectId', data);
+            }
+          } catch (err) {
+            console.warn('Back4App PushSubscription POST error:', err);
+          }
+
         } catch (err) {
-          console.warn('Back4App Push Installation Note:', err);
+          console.warn('subscribeUserToPush error:', err);
         }
+      } else {
+        console.warn('Push or ServiceWorker not supported in this browser');
+      }
+    }
+
+    // Update channels array in PushSubscription object on Back4App
+    async function updateChannelsOnServer() {
+      const objectId = localStorage.getItem('push_objectId');
+      if (!objectId) return;
+      try {
+        await fetch(`https://parseapi.back4app.com/classes/PushSubscription/${objectId}`, {
+          method: 'PUT',
+          headers: {
+            'X-Parse-Application-Id': BACK4APP_APP_ID,
+            'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ channels: Array.from(alertSelectedGames) })
+        });
+      } catch (e) {
+        console.warn('updateChannelsOnServer error', e);
       }
     }
 
@@ -804,8 +776,8 @@
             }
           })
         });
-        const result = await response.json();
-        console.log('[Back4App] Sync Result:', result);
+        const result = await response.json().catch(()=>null);
+        if (result) console.log('[Back4App] Sync Result:', result);
       } catch (err) {
         console.warn('Back4App Sync Error:', err);
       }
@@ -826,6 +798,8 @@
               alertSelectedGames.add(item.gameId);
             }
           });
+          // persist loaded alerts
+          try { localStorage.setItem('alertSelectedGames', JSON.stringify(Array.from(alertSelectedGames))); } catch(e) {}
           if (cachedEventsList.length > 0) {
             renderCards(cachedEventsList);
           }
@@ -1017,6 +991,7 @@
       fetchScoreboard();
     }
 
+    // Persist selected games, update backend channels
     function toggleAlert(id, e) {
       e.stopPropagation();
       let isNowActive = false;
@@ -1026,7 +1001,18 @@
         alertSelectedGames.add(id);
         isNowActive = true;
       }
+
+      // persist selection so it survives reloads
+      try {
+        localStorage.setItem('alertSelectedGames', JSON.stringify(Array.from(alertSelectedGames)));
+      } catch (err) {
+        console.warn('save alertSelectedGames error', err);
+      }
+
+      // existing server-side logging
       syncGameAlertToBack4App(id, isNowActive);
+      // update PushSubscription.channels in the backend so job can target subscribers
+      updateChannelsOnServer();
       fetchScoreboard();
     }
 
