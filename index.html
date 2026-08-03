@@ -532,7 +532,6 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-      // Register Service Worker for Web Push
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(err => {
           console.warn('Service Worker registration note:', err);
@@ -599,7 +598,7 @@
             method: 'POST',
             headers: {
               'X-Parse-Application-Id': BACK4APP_APP_ID,
-              'X-Parse-REST-API-Key': BACK4APP_JS_KEY,
+              'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -620,19 +619,24 @@
 
     async function syncGameAlertToBack4App(gameId, isAlertActive) {
       try {
-        await fetch('https://parseapi.back4app.com/classes/GameAlerts', {
+        const response = await fetch('https://parseapi.back4app.com/classes/GameAlerts', {
           method: 'POST',
           headers: {
             'X-Parse-Application-Id': BACK4APP_APP_ID,
-            'X-Parse-REST-API-Key': BACK4APP_JS_KEY,
+            'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            gameId: gameId,
+            gameId: String(gameId),
             alertActive: isAlertActive,
-            timestamp: new Date().toISOString()
+            timestamp: {
+              "__type": "Date",
+              "iso": new Date().toISOString()
+            }
           })
         });
+        const result = await response.json();
+        console.log('[Back4App] Sync Result:', result);
       } catch (err) {
         console.warn('Back4App Sync Error:', err);
       }
@@ -643,7 +647,7 @@
         const res = await fetch('https://parseapi.back4app.com/classes/GameAlerts?limit=100&order=-createdAt', {
           headers: {
             'X-Parse-Application-Id': BACK4APP_APP_ID,
-            'X-Parse-REST-API-Key': BACK4APP_JS_KEY
+            'X-Parse-JavaScript-Key': BACK4APP_JS_KEY
           }
         }).then(r => r.json());
 
