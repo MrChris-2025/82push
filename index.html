@@ -13,7 +13,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;700&display=swap" rel="stylesheet">
 
   <style>
-    /* CSS RESET & VARIABLES */
     * {
       box-sizing: border-box;
       margin: 0;
@@ -43,7 +42,6 @@
       flex-direction: column;
     }
 
-    /* STICKY TOP NAVBAR */
     .navbar {
       position: sticky;
       top: 0;
@@ -72,7 +70,7 @@
       color: var(--accent-red);
     }
 
-    /* NEON BUTTON STYLING (RED WHEN INACTIVE / GREEN WHEN ACTIVATED) */
+    /* NEON TOGGLE BUTTON (INACTIVE = NEON RED, ACTIVATED = NEON GREEN) */
     .pwa-btn {
       padding: 8px 18px;
       border-radius: 20px;
@@ -106,14 +104,12 @@
       box-shadow: 0 0 18px rgba(0, 230, 118, 0.9), inset 0 0 10px rgba(0, 230, 118, 0.6);
     }
 
-    /* MAIN APP LAYOUT */
     .app-container {
       display: flex;
       flex: 1;
       width: 100%;
     }
 
-    /* STICKY LEFT SIDEBAR */
     .sidebar {
       position: sticky;
       top: 65px;
@@ -127,15 +123,6 @@
       flex-direction: column;
       gap: 4px;
       overflow-y: auto;
-    }
-
-    .sidebar::-webkit-scrollbar {
-      width: 4px;
-    }
-
-    .sidebar::-webkit-scrollbar-thumb {
-      background: var(--glass-border);
-      border-radius: 4px;
     }
 
     .sidebar-title {
@@ -166,7 +153,6 @@
       font-weight: 700;
     }
 
-    /* MAIN CONTENT AREA */
     .content-area {
       flex: 1;
       padding: 24px;
@@ -175,22 +161,12 @@
       gap: 20px;
     }
 
-    /* DYNAMIC DATE SCROLLER */
     .date-scroller {
       display: flex;
       align-items: center;
       gap: 12px;
       overflow-x: auto;
       padding-bottom: 8px;
-    }
-
-    .date-scroller::-webkit-scrollbar {
-      height: 4px;
-    }
-
-    .date-scroller::-webkit-scrollbar-thumb {
-      background: var(--glass-border);
-      border-radius: 4px;
     }
 
     .date-chip {
@@ -212,14 +188,12 @@
       font-weight: 700;
     }
 
-    /* SCOREBOARD GRID */
     .scoreboard-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 20px;
     }
 
-    /* GLASS SCOREBOARD CARDS */
     .score-card {
       background: var(--glass-bg);
       backdrop-filter: blur(16px);
@@ -240,7 +214,6 @@
       box-shadow: 0 12px 40px 0 var(--glass-glow);
     }
 
-    /* ROTATED FINAL CARDS */
     .score-card.is-final {
       opacity: 0.45;
       filter: grayscale(80%);
@@ -313,10 +286,6 @@
       font-weight: 700;
     }
 
-    .score-card.is-final .team-score {
-      font-weight: 400;
-    }
-
     .leading-score {
       color: var(--accent-green);
     }
@@ -328,7 +297,6 @@
       text-transform: uppercase;
     }
 
-    /* MODAL POPUP */
     .modal-overlay {
       position: fixed;
       top: 0;
@@ -383,7 +351,6 @@
       cursor: pointer;
     }
 
-    /* 75/25 SPLIT BODY */
     .modal-body {
       display: flex;
       flex: 1;
@@ -433,7 +400,6 @@
       margin-top: 2px;
     }
 
-    /* STREAM SOURCE BUTTONS */
     .sources-list {
       display: flex;
       flex-wrap: wrap;
@@ -455,7 +421,6 @@
       background: var(--accent-red);
     }
 
-    /* RESPONSIVE LAYOUT */
     @media (max-width: 900px) {
       .app-container {
         flex-direction: column;
@@ -498,7 +463,6 @@
   </header>
 
   <div class="app-container">
-    
     <aside class="sidebar">
       <div class="sidebar-title">Categories</div>
       <div class="sport-link active" onclick="switchSport('all', 'all', this)">All Sports</div>
@@ -515,9 +479,7 @@
 
     <main class="content-area">
       <div class="date-scroller" id="dateScroller"></div>
-
-      <div class="scoreboard-grid" id="scoreboardGrid">
-        </div>
+      <div class="scoreboard-grid" id="scoreboardGrid"></div>
     </main>
   </div>
 
@@ -531,14 +493,14 @@
         <div class="player-section">
           <iframe id="streamPlayer" src="" allowfullscreen></iframe>
         </div>
-        <div class="details-section" id="modalDetails">
-          </div>
+        <div class="details-section" id="modalDetails"></div>
       </div>
     </div>
   </div>
 
+  <script src="streamed.js"></script>
+
   <script>
-    // GLOBAL CONFIG & CONSTANTS
     const BACK4APP_APP_ID = "obf7aTUggazRscBY140M2kWTRbhcuiintFMuuh7M";
     const BACK4APP_JS_KEY = "byBfXw4lc8QrxfDxzscc6KoH0oejmLubmusyGowa";
     const VAPID_PUBLIC_KEY = "BA8NXZjt4Aj2NsNFZwFQJPvNHoGdz87nVB_0MJCQdbXFMhgOmkWsd-STbCKtgPIBPrWF7-Umqrili8Ef4xS352E";
@@ -560,64 +522,9 @@
     let selectedDate = formatDateForESPN(new Date());
     let alertSelectedGames = new Set();
     let pinnedGames = new Set();
-    let matchesDataCache = [];
     let cachedEventsList = [];
     let isPushEnabled = false;
 
-    // HELPER: Normalize strings for fuzzy comparison
-    function normalizeText(str) {
-      if (!str) return '';
-      return str
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .replace(/\b(fc|vs|the|team)\b/g, '')
-        .trim();
-    }
-
-    // MATCHING ALGORITHM FOR STREAMED.PK
-    function findMatchingStream(homeTeam, awayTeam) {
-      if (!matchesDataCache || matchesDataCache.length === 0) return null;
-
-      const homeTokens = [
-        homeTeam?.displayName,
-        homeTeam?.name,
-        homeTeam?.shortDisplayName,
-        homeTeam?.abbreviation
-      ].map(normalizeText).filter(Boolean);
-
-      const awayTokens = [
-        awayTeam?.displayName,
-        awayTeam?.name,
-        awayTeam?.shortDisplayName,
-        awayTeam?.abbreviation
-      ].map(normalizeText).filter(Boolean);
-
-      let bestMatch = null;
-      let highestScore = 0;
-
-      for (const match of matchesDataCache) {
-        const titleNorm = normalizeText(match.title);
-        let currentScore = 0;
-
-        const homeFound = homeTokens.some(token => token.length > 2 && titleNorm.includes(token));
-        const awayFound = awayTokens.some(token => token.length > 2 && titleNorm.includes(token));
-
-        if (homeFound && awayFound) {
-          currentScore = 10;
-        } else if (homeFound || awayFound) {
-          currentScore = 4;
-        }
-
-        if (currentScore > highestScore) {
-          highestScore = currentScore;
-          bestMatch = match;
-        }
-      }
-
-      return highestScore >= 4 ? bestMatch : null;
-    }
-
-    // HELPER: Format Date Object to YYYYMMDD string for ESPN API
     function formatDateForESPN(dateObj) {
       const yyyy = dateObj.getFullYear();
       const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -625,7 +532,6 @@
       return `${yyyy}${mm}${dd}`;
     }
 
-    // INITIALIZATION
     document.addEventListener("DOMContentLoaded", () => {
       setupDateScroller();
       initPushAlertButton();
@@ -645,7 +551,6 @@
       }, 60000);
     });
 
-    // PWA & NEON BUTTON TOGGLE
     function initPushAlertButton() {
       const btn = document.getElementById('pwaAlertBtn');
       btn.onclick = togglePushAlerts;
@@ -663,16 +568,15 @@
           }
         }
         isPushEnabled = true;
-        btn.classList.add('active');
+        btn.classList.add('active'); // Dynamic shift to Neon Green
         btnText.innerText = 'Push Alerts Active';
       } else {
         isPushEnabled = false;
-        btn.classList.remove('active');
+        btn.classList.remove('active'); // Dynamic shift back to Neon Red
         btnText.innerText = 'Enable Push Alerts';
       }
     }
 
-    // BACK4APP: Save / Sync Subscription & Alerts
     async function subscribeUserToPush() {
       if ('serviceWorker' in navigator) {
         try {
@@ -745,7 +649,6 @@
       }
     }
 
-    // DYNAMIC DATE SCROLLER BUILDER
     function setupDateScroller() {
       const scroller = document.getElementById('dateScroller');
       scroller.innerHTML = '';
@@ -770,7 +673,6 @@
       }
     }
 
-    // SPORT SWITCHER
     function switchSport(sport, league, element) {
       document.querySelectorAll('.sport-link').forEach(l => l.classList.remove('active'));
       element.classList.add('active');
@@ -779,7 +681,6 @@
       fetchScoreboard();
     }
 
-    // FETCH ESPN SCOREBOARD & STREAM DATA WITH DATE QUERY
     async function fetchScoreboard() {
       const grid = document.getElementById('scoreboardGrid');
       
@@ -803,12 +704,11 @@
           );
         }
 
-        const [eventsResults, streamRes] = await Promise.all([
+        const [eventsResults] = await Promise.all([
           Promise.all(fetchPromises),
-          fetch('https://streamed.pk/api/matches/live').then(r => r.json()).catch(() => [])
+          fetchLiveStreams() // Called from streamed.js
         ]);
 
-        matchesDataCache = streamRes;
         const aggregatedEvents = eventsResults.flat();
         cachedEventsList = aggregatedEvents;
         
@@ -818,7 +718,6 @@
       }
     }
 
-    // CALCULATE COUNTDOWN TIMER FORMAT
     function getStartsInCountdown(eventDateStr) {
       const startTime = new Date(eventDateStr);
       const now = new Date();
@@ -839,7 +738,6 @@
       }
     }
 
-    // RENDER SCOREBOARD CARDS
     function renderCards(events) {
       const grid = document.getElementById('scoreboardGrid');
       grid.innerHTML = '';
@@ -926,7 +824,6 @@
       });
     }
 
-    // ACTIONS: PIN & ALERT TOGGLES
     function togglePin(id, e) {
       e.stopPropagation();
       if (pinnedGames.has(id)) pinnedGames.delete(id);
@@ -947,7 +844,6 @@
       fetchScoreboard();
     }
 
-    // MODAL PLAYER AND DETAILS (RESTRUCTURED LINKAGE)
     async function openModal(event, competition) {
       const modal = document.getElementById('streamModal');
       const title = document.getElementById('modalTitle');
@@ -992,13 +888,8 @@
       let matchedStream = findMatchingStream(home?.team, away?.team);
 
       if (!matchedStream) {
-        try {
-          const freshStreams = await fetch('https://streamed.pk/api/matches/live').then(r => r.json());
-          matchesDataCache = freshStreams || [];
-          matchedStream = findMatchingStream(home?.team, away?.team);
-        } catch (e) {
-          console.warn("Live stream fallback fetch failed", e);
-        }
+        await fetchLiveStreams();
+        matchedStream = findMatchingStream(home?.team, away?.team);
       }
 
       const sourcesContainer = document.getElementById('sourcesList');
@@ -1021,13 +912,9 @@
 
     async function loadStreamSource(source, id) {
       const player = document.getElementById('streamPlayer');
-      try {
-        const res = await fetch(`https://streamed.pk/api/stream/${source}/${id}`).then(r => r.json());
-        if (res && res.length > 0 && res[0].embedUrl) {
-          player.src = res[0].embedUrl;
-        }
-      } catch (e) {
-        console.error("Error loading stream", e);
+      const embedUrl = await fetchStreamEmbedUrl(source, id);
+      if (embedUrl) {
+        player.src = embedUrl;
       }
     }
 
