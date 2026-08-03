@@ -534,6 +534,15 @@
       return `${yyyy}${mm}${dd}`;
     }
 
+    function generateInstallationId() {
+      let id = localStorage.getItem('parse_installation_id');
+      if (!id) {
+        id = 'inst-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        localStorage.setItem('parse_installation_id', id);
+      }
+      return id;
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(err => {
@@ -593,9 +602,6 @@
             userVisibleOnly: true,
             applicationServerKey: VAPID_PUBLIC_KEY
           });
-          
-          const keyP256dh = sub.getKey ? btoa(String.fromCharCode.apply(null, new Uint8Array(sub.getKey('p256dh')))) : '';
-          const keyAuth = sub.getKey ? btoa(String.fromCharCode.apply(null, new Uint8Array(sub.getKey('auth')))) : '';
 
           await fetch('https://parseapi.back4app.com/classes/_Installation', {
             method: 'POST',
@@ -606,14 +612,9 @@
             },
             body: JSON.stringify({
               deviceType: 'web',
+              installationId: generateInstallationId(),
               deviceToken: sub.endpoint,
-              installationId: sub.endpoint,
-              pushToken: sub.endpoint,
-              channels: Array.from(alertSelectedGames),
-              keys: {
-                p256dh: keyP256dh,
-                auth: keyAuth
-              }
+              channels: Array.from(alertSelectedGames)
             })
           });
         } catch (err) {
