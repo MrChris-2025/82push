@@ -484,18 +484,16 @@
     
     <aside class="sidebar">
       <div class="sidebar-title">Categories</div>
+      <div class="sport-link active" onclick="switchSport('all', 'all', this)">All Sports</div>
       <div class="sport-link" onclick="switchSport('baseball', 'mlb', this)">Baseball (MLB)</div>
       <div class="sport-link" onclick="switchSport('basketball', 'nba', this)">Basketball (NBA)</div>
-      <div class="sport-link" onclick="switchSport('basketball', 'wnba', this)">Basketball (WNBA)</div>
       <div class="sport-link" onclick="switchSport('basketball', 'mens-college-basketball', this)">College Hoops (NCAAM)</div>
       <div class="sport-link" onclick="switchSport('football', 'college-football', this)">College Gridiron (NCAAF)</div>
-      <div class="sport-link active" onclick="switchSport('football', 'nfl', this)">Football (NFL)</div>
+      <div class="sport-link" onclick="switchSport('football', 'nfl', this)">Football (NFL)</div>
       <div class="sport-link" onclick="switchSport('hockey', 'nhl', this)">Hockey (NHL)</div>
       <div class="sport-link" onclick="switchSport('mma', 'ufc', this)">MMA (UFC)</div>
-      <div class="sport-link" onclick="switchSport('racing', 'f1', this)">Racing (F1)</div>
       <div class="sport-link" onclick="switchSport('soccer', 'usa.1', this)">Soccer (MLS)</div>
       <div class="sport-link" onclick="switchSport('soccer', 'eng.1', this)">Soccer (EPL)</div>
-      <div class="sport-link" onclick="switchSport('tennis', 'atp', this)">Tennis (ATP)</div>
     </aside>
 
     <main class="content-area">
@@ -528,12 +526,26 @@
     const BACK4APP_JS_KEY = "byBfXw4lc8QrxfDxzscc6KoH0oejmLubmusyGowa";
     const VAPID_PUBLIC_KEY = "BA8NXZjt4Aj2NsNFZwFQJPvNHoGdz87nVB_0MJCQdbXFMhgOmkWsd-STbCKtgPIBPrWF7-Umqrili8Ef4xS352E";
 
-    let currentSport = 'football';
-    let currentLeague = 'nfl';
+    // ALL SPORTS ENDPOINTS LIST
+    const ALL_SPORTS_LEAGUES = [
+      { sport: 'football', league: 'nfl' },
+      { sport: 'basketball', league: 'nba' },
+      { sport: 'baseball', league: 'mlb' },
+      { sport: 'hockey', league: 'nhl' },
+      { sport: 'mma', league: 'ufc' },
+      { sport: 'soccer', league: 'usa.1' },
+      { sport: 'soccer', league: 'eng.1' },
+      { sport: 'football', league: 'college-football' },
+      { sport: 'basketball', league: 'mens-college-basketball' }
+    ];
+
+    let currentSport = 'all';
+    let currentLeague = 'all';
     let selectedDate = formatDateForESPN(new Date());
     let alertSelectedGames = new Set();
     let pinnedGames = new Set();
     let matchesDataCache = [];
+    let cachedEventsList = [];
 
     // HELPER: Format Date Object to YYYYMMDD string for ESPN API
     function formatDateForESPN(dateObj) {
@@ -555,6 +567,13 @@
           fetchScoreboard();
         }
       }, 240000);
+
+      // Ticker every 60 seconds to update live countdown timers on cards
+      setInterval(() => {
+        if (cachedEventsList.length > 0) {
+          renderCards(cachedEventsList);
+        }
+      }, 60000);
     });
 
     // PWA & HOME SCREEN DETECTION
@@ -637,18 +656,62 @@
     // FETCH ESPN SCOREBOARD & STREAM DATA WITH DATE QUERY
     async function fetchScoreboard() {
       const grid = document.getElementById('scoreboardGrid');
-      let espnUrl = `https://site.api.espn.com/apis/site/v2/sports/${currentSport}/${currentLeague}/scoreboard?dates=${selectedDate}`;
       
       try {
-        const [espnRes, streamRes] = await Promise.all([
-          fetch(espnUrl).then(r => r.json()),
+        let fetchPromises = [];
+
+        if (currentSport === 'all') {
+          fetchPromises = ALL_SPORTS_LEAGUES.map(item => 
+            fetch(`https://site.api.espn.com/apis/site/v2/sports/${item.sport}/${item.league}/scoreboard?dates=${selectedDate}`)
+              .then(r => r.json())
+              .then(data => data.events || [])
+              .catch(() => [])
+          );
+        } else {
+          const espnUrl = `https://site.api.espn.com/apis/site/v2/sports/${currentSport}/${currentLeague}/scoreboard?dates=${selectedDate}`;
+          fetchPromises.push(
+            fetch(espnUrl)
+              .then(r => r.json())
+              .then(data => data.events || [])
+              .catch(() => [])
+          );
+        }
+
+        const [eventsResults, streamRes] = await Promise.all([
+          Promise.all(fetchPromises),
           fetch('https://streamed.pk/api/matches/live').then(r => r.json()).catch(() => [])
         ]);
 
         matchesDataCache = streamRes;
-        renderCards(espnRes.events || []);
+        
+        // Flatten aggregated events across all sports
+        const aggregatedEvents = eventsResults.flat();
+        cachedEventsList = aggregatedEvents;
+        
+        renderCards(aggregatedEvents);
       } catch (err) {
         grid.innerHTML = '<div style="color:var(--text-muted)">Failed to load schedule/scores for this date.</div>';
+      }
+    }
+
+    // CALCULATE COUNTDOWN TIMER FORMAT
+    function getStartsInCountdown(eventDateStr) {
+      const startTime = new Date(eventDateStr);
+      const now = new Date();
+      const diffMs = startTime - now;
+
+      if (diffMs <= 0) {
+        return startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      }
+
+      const diffMins = Math.floor(diffMs / 60000);
+      const hours = Math.floor(diffMins / 60);
+      const mins = diffMins % 60;
+
+      if (hours > 0) {
+        return `Starts in ${hours}h ${mins}m`;
+      } else {
+        return `Starts in ${mins}m`;
       }
     }
 
@@ -657,7 +720,7 @@
       const grid = document.getElementById('scoreboardGrid');
       grid.innerHTML = '';
 
-      if (events.length === 0) {
+      if (!events || events.length === 0) {
         grid.innerHTML = '<div style="color:var(--text-muted); padding: 20px;">No games scheduled for this date.</div>';
         return;
       }
@@ -668,35 +731,35 @@
         const bPinned = pinnedGames.has(b.id) ? 1 : 0;
         if (aPinned !== bPinned) return bPinned - aPinned;
 
-        const aFinal = a.status.type.completed ? 1 : 0;
-        const bFinal = b.status.type.completed ? 1 : 0;
+        const aFinal = a.status?.type?.completed ? 1 : 0;
+        const bFinal = b.status?.type?.completed ? 1 : 0;
         return aFinal - bFinal;
       });
 
       events.forEach(event => {
-        const competition = event.competitions[0];
-        const home = competition.competitors.find(c => c.homeAway === 'home') || competition.competitors[0];
-        const away = competition.competitors.find(c => c.homeAway === 'away') || competition.competitors[1];
-        const isCompleted = event.status.type.completed;
+        const competition = event.competitions?.[0];
+        if (!competition) return;
+
+        const home = competition.competitors?.find(c => c.homeAway === 'home') || competition.competitors?.[0];
+        const away = competition.competitors?.find(c => c.homeAway === 'away') || competition.competitors?.[1];
+        
+        if (!home || !away) return;
+
+        const isCompleted = event.status?.type?.completed;
         const isPinned = pinnedGames.has(event.id);
         const hasAlert = alertSelectedGames.has(event.id);
 
         const homeScore = parseInt(home.score || '0');
         const awayScore = parseInt(away.score || '0');
 
-        // Status display (No "Scheduled" word)
+        // Status display with dynamic countdown timer (No "Scheduled" word)
         let statusDisplay = '';
         if (isCompleted) {
           statusDisplay = 'FINAL';
-        } else if (event.status.type.state === 'in') {
-          statusDisplay = event.status.type.detail;
+        } else if (event.status?.type?.state === 'in') {
+          statusDisplay = event.status?.type?.detail || 'LIVE';
         } else {
-          const startTime = new Date(event.date);
-          const now = new Date();
-          const diffMins = Math.round((startTime - now) / 60000);
-          statusDisplay = (diffMins > 0 && diffMins <= 180) 
-            ? `Starts in ${diffMins}m` 
-            : startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+          statusDisplay = getStartsInCountdown(event.date);
         }
 
         const card = document.createElement('div');
@@ -763,23 +826,23 @@
       const details = document.getElementById('modalDetails');
       const player = document.getElementById('streamPlayer');
 
-      const home = competition.competitors.find(c => c.homeAway === 'home') || competition.competitors[0];
-      const away = competition.competitors.find(c => c.homeAway === 'away') || competition.competitors[1];
+      const home = competition.competitors?.find(c => c.homeAway === 'home') || competition.competitors?.[0];
+      const away = competition.competitors?.find(c => c.homeAway === 'away') || competition.competitors?.[1];
 
-      title.innerText = `${home.team?.displayName || 'TBD'} vs ${away.team?.displayName || 'TBD'}`;
+      title.innerText = `${home?.team?.displayName || 'TBD'} vs ${away?.team?.displayName || 'TBD'}`;
 
       // Find matching stream from streamed.pk cache
       const matchedStream = matchesDataCache.find(m => 
-        home.team?.name && m.title.toLowerCase().includes(home.team.name.toLowerCase()) || 
-        away.team?.name && m.title.toLowerCase().includes(away.team.name.toLowerCase())
+        home?.team?.name && m.title.toLowerCase().includes(home.team.name.toLowerCase()) || 
+        away?.team?.name && m.title.toLowerCase().includes(away.team.name.toLowerCase())
       );
 
       details.innerHTML = `
         <div class="stat-box">
           <div class="stat-label">Scoreboard</div>
           <div class="stat-value">
-            <span class="${parseInt(home.score || 0) > parseInt(away.score || 0) ? 'leading-score' : ''}">${home.team?.abbreviation || 'HOME'} ${home.score || 0}</span> - 
-            <span class="${parseInt(away.score || 0) > parseInt(home.score || 0) ? 'leading-score' : ''}">${away.team?.abbreviation || 'AWAY'} ${away.score || 0}</span>
+            <span class="${parseInt(home?.score || 0) > parseInt(away?.score || 0) ? 'leading-score' : ''}">${home?.team?.abbreviation || 'HOME'} ${home?.score || 0}</span> - 
+            <span class="${parseInt(away?.score || 0) > parseInt(home?.score || 0) ? 'leading-score' : ''}">${away?.team?.abbreviation || 'AWAY'} ${away?.score || 0}</span>
           </div>
         </div>
 
