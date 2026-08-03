@@ -8,6 +8,9 @@
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0B0E14">
 
+  <script src="https://cdn.jsdelivr.net/npm/vconsole@latest/dist/vconsole.min.js"></script>
+  <script>var vConsole = new VConsole();</script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;700&display=swap" rel="stylesheet">
@@ -602,7 +605,9 @@
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              deviceType: 'push',
+              deviceType: 'web',
+              deviceToken: sub.endpoint,
+              installationId: sub.endpoint,
               pushToken: sub.endpoint,
               channels: Array.from(alertSelectedGames),
               keys: {
@@ -723,7 +728,7 @@
 
         const [eventsResults] = await Promise.all([
           Promise.all(fetchPromises),
-          fetchLiveStreams()
+          typeof fetchLiveStreams === 'function' ? fetchLiveStreams() : Promise.resolve([])
         ]);
 
         const aggregatedEvents = eventsResults.flat();
@@ -902,9 +907,9 @@
 
       modal.classList.add('active');
 
-      let matchedStream = findMatchingStream(home?.team, away?.team);
+      let matchedStream = typeof findMatchingStream === 'function' ? findMatchingStream(home?.team, away?.team) : null;
 
-      if (!matchedStream) {
+      if (!matchedStream && typeof fetchLiveStreams === 'function') {
         await fetchLiveStreams();
         matchedStream = findMatchingStream(home?.team, away?.team);
       }
@@ -929,7 +934,7 @@
 
     async function loadStreamSource(source, id) {
       const player = document.getElementById('streamPlayer');
-      const embedUrl = await fetchStreamEmbedUrl(source, id);
+      const embedUrl = typeof fetchStreamEmbedUrl === 'function' ? await fetchStreamEmbedUrl(source, id) : null;
       if (embedUrl) {
         player.src = embedUrl;
       }
