@@ -70,7 +70,6 @@
       color: var(--accent-red);
     }
 
-    /* NEON TOGGLE BUTTON (INACTIVE = NEON RED, ACTIVATED = NEON GREEN) */
     .pwa-btn {
       padding: 8px 18px;
       border-radius: 20px;
@@ -533,6 +532,13 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+      // Register Service Worker for Web Push
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(err => {
+          console.warn('Service Worker registration note:', err);
+        });
+      }
+
       setupDateScroller();
       initPushAlertButton();
       loadUserAlertsFromBack4App();
@@ -568,11 +574,11 @@
           }
         }
         isPushEnabled = true;
-        btn.classList.add('active'); // Dynamic shift to Neon Green
+        btn.classList.add('active');
         btnText.innerText = 'Push Alerts Active';
       } else {
         isPushEnabled = false;
-        btn.classList.remove('active'); // Dynamic shift back to Neon Red
+        btn.classList.remove('active');
         btnText.innerText = 'Enable Push Alerts';
       }
     }
@@ -586,6 +592,9 @@
             applicationServerKey: VAPID_PUBLIC_KEY
           });
           
+          const keyP256dh = sub.getKey ? btoa(String.fromCharCode.apply(null, new Uint8Array(sub.getKey('p256dh')))) : '';
+          const keyAuth = sub.getKey ? btoa(String.fromCharCode.apply(null, new Uint8Array(sub.getKey('auth')))) : '';
+
           await fetch('https://parseapi.back4app.com/classes/_Installation', {
             method: 'POST',
             headers: {
@@ -596,7 +605,11 @@
             body: JSON.stringify({
               deviceType: 'push',
               pushToken: sub.endpoint,
-              channels: Array.from(alertSelectedGames)
+              channels: Array.from(alertSelectedGames),
+              keys: {
+                p256dh: keyP256dh,
+                auth: keyAuth
+              }
             })
           });
         } catch (err) {
@@ -706,7 +719,7 @@
 
         const [eventsResults] = await Promise.all([
           Promise.all(fetchPromises),
-          fetchLiveStreams() // Called from streamed.js
+          fetchLiveStreams()
         ]);
 
         const aggregatedEvents = eventsResults.flat();
