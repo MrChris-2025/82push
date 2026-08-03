@@ -1,0 +1,17 @@
+{
+  "short_name": "SportsLive",
+  "name": "SportsLive Liquid Glass",
+  "icons": [
+    {
+      "src": "https://hcforever.nekoweb.org/02push/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#0B0E14",
+  "theme_color": "#0B0E14",
+  "display": "standalone",
+  "orientation": "any"
+}
