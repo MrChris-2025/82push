@@ -104,14 +104,24 @@
       position: sticky;
       top: 65px;
       height: calc(100vh - 65px);
-      width: 220px;
+      width: 230px;
       background: var(--glass-bg);
       backdrop-filter: blur(12px);
       border-right: 1px solid var(--glass-border);
       padding: 20px 0;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 4px;
+      overflow-y: auto;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: var(--glass-border);
+      border-radius: 4px;
     }
 
     .sidebar-title {
@@ -124,9 +134,10 @@
     }
 
     .sport-link {
-      padding: 12px 20px;
+      padding: 10px 20px;
       color: var(--text-main);
       font-weight: 300;
+      font-size: 0.9rem;
       text-decoration: none;
       display: flex;
       align-items: center;
@@ -473,10 +484,18 @@
     
     <aside class="sidebar">
       <div class="sidebar-title">Categories</div>
-      <div class="sport-link active" onclick="switchSport('football', 'nfl', this)">NFL</div>
-      <div class="sport-link" onclick="switchSport('basketball', 'nba', this)">NBA</div>
-      <div class="sport-link" onclick="switchSport('baseball', 'mlb', this)">MLB</div>
-      <div class="sport-link" onclick="switchSport('mma', 'ufc', this)">UFC</div>
+      <div class="sport-link" onclick="switchSport('baseball', 'mlb', this)">Baseball (MLB)</div>
+      <div class="sport-link" onclick="switchSport('basketball', 'nba', this)">Basketball (NBA)</div>
+      <div class="sport-link" onclick="switchSport('basketball', 'wnba', this)">Basketball (WNBA)</div>
+      <div class="sport-link" onclick="switchSport('basketball', 'mens-college-basketball', this)">College Hoops (NCAAM)</div>
+      <div class="sport-link" onclick="switchSport('football', 'college-football', this)">College Gridiron (NCAAF)</div>
+      <div class="sport-link active" onclick="switchSport('football', 'nfl', this)">Football (NFL)</div>
+      <div class="sport-link" onclick="switchSport('hockey', 'nhl', this)">Hockey (NHL)</div>
+      <div class="sport-link" onclick="switchSport('mma', 'ufc', this)">MMA (UFC)</div>
+      <div class="sport-link" onclick="switchSport('racing', 'f1', this)">Racing (F1)</div>
+      <div class="sport-link" onclick="switchSport('soccer', 'usa.1', this)">Soccer (MLS)</div>
+      <div class="sport-link" onclick="switchSport('soccer', 'eng.1', this)">Soccer (EPL)</div>
+      <div class="sport-link" onclick="switchSport('tennis', 'atp', this)">Tennis (ATP)</div>
     </aside>
 
     <main class="content-area">
@@ -509,8 +528,8 @@
     const BACK4APP_JS_KEY = "byBfXw4lc8QrxfDxzscc6KoH0oejmLubmusyGowa";
     const VAPID_PUBLIC_KEY = "BA8NXZjt4Aj2NsNFZwFQJPvNHoGdz87nVB_0MJCQdbXFMhgOmkWsd-STbCKtgPIBPrWF7-Umqrili8Ef4xS352E";
 
-    let currentSport = 'baseball';
-    let currentLeague = 'mlb';
+    let currentSport = 'football';
+    let currentLeague = 'nfl';
     let selectedDate = formatDateForESPN(new Date());
     let alertSelectedGames = new Set();
     let pinnedGames = new Set();
