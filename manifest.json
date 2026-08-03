@@ -3,7 +3,7 @@
   "name": "SportsLive Liquid Glass",
   "icons": [
     {
-      "src": "icon-512.png",
+      "src": "icon-512.ico",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
