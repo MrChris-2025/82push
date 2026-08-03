@@ -502,181 +502,509 @@
 
   <script src="streamed.js"></script>
 
-  <!--
-    Non-invasive push-bridge: does NOT modify streamed.js or your VAPID keys.
-    Paste this after streamed.js. It monkey-patches the UI handlers at runtime,
-    saves full PushSubscription objects to Back4App PushSubscription class, and
-    keeps subscription channels in sync when user toggles alerts.
-  -->
-  <script>
-  (function() {
-    document.addEventListener('DOMContentLoaded', () => {
-      // Utilities (safe to use even if some globals are not present)
-      function urlBase64ToUint8Array(base64String) {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        for (let i = 0; i < rawData.length; ++i) {
-          outputArray[i] = rawData.charCodeAt(i);
-        }
-        return outputArray;
-      }
-      function generateInstallationId() {
-        let id = localStorage.getItem('parse_installation_id');
-        if (!id) {
-          id = 'inst-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-          localStorage.setItem('parse_installation_id', id);
-        }
-        return id;
-      }
-      function getBack4AppKeys() {
-        // streamed.js defines constants like BACK4APP_APP_ID at top-level.
-        // Safely read them (typeof checks avoid ReferenceError).
-        const appId = (typeof BACK4APP_APP_ID !== 'undefined') ? BACK4APP_APP_ID : (window.BACK4APP_APP_ID || null);
-        const jsKey = (typeof BACK4APP_JS_KEY !== 'undefined') ? BACK4APP_JS_KEY : (window.BACK4APP_JS_KEY || null);
-        return { appId, jsKey };
-      }
-      async function saveSubscriptionToServer(subscription, channels) {
-        const { appId, jsKey } = getBack4AppKeys();
-        if (!appId || !jsKey) {
-          console.warn('push-bridge: missing Back4App keys');
-          return null;
-        }
-        const installationId = generateInstallationId();
-        const objectId = localStorage.getItem('push_objectId');
-        const body = {
-          subscription: subscription,
-          installationId: installationId,
-          platform: navigator.userAgent,
-          channels: channels || []
-        };
-        const base = 'https://parseapi.back4app.com/classes/PushSubscription';
-        const headers = {
-          'X-Parse-Application-Id': appId,
-          'X-Parse-JavaScript-Key': jsKey,
-          'Content-Type': 'application/json'
-        };
-        try {
-          if (objectId) {
-            const res = await fetch(`${base}/${objectId}`, { method: 'PUT', headers, body: JSON.stringify(body) });
-            if (res.ok) return objectId;
-            // fallthrough to create
-          }
-          const createRes = await fetch(base, { method: 'POST', headers, body: JSON.stringify(body) });
-          const data = await createRes.json().catch(()=>null);
-          if (data && data.objectId) {
-            localStorage.setItem('push_objectId', data.objectId);
-            return data.objectId;
-          }
-        } catch (e) {
-          console.warn('push-bridge: saveSubscriptionToServer error', e);
-        }
-        return null;
-      }
-      async function updateChannelsOnServer(channels) {
-        const objectId = localStorage.getItem('push_objectId');
-        if (!objectId) return;
-        const { appId, jsKey } = getBack4AppKeys();
-        if (!appId || !jsKey) return;
-        try {
-          await fetch(`https://parseapi.back4app.com/classes/PushSubscription/${objectId}`, {
-            method: 'PUT',
-            headers: {
-              'X-Parse-Application-Id': appId,
-              'X-Parse-JavaScript-Key': jsKey,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ channels })
-          });
-        } catch (e) {
-          console.warn('push-bridge: updateChannelsOnServer error', e);
-        }
-      }
-
-      // Monkey-patch togglePushAlerts (if present) to ensure full subscription saved.
-      if (typeof window.togglePushAlerts === 'function') {
-        const orig = window.togglePushAlerts;
-        window.togglePushAlerts = async function patchedTogglePushAlerts(...args) {
-          try {
-            // Let original run (UI / permission request)
-            const result = orig.apply(this, args);
-
-            // If permission not granted yet, wait a tick and re-check
-            if (Notification.permission !== 'granted') {
-              // original likely asked for permission; wait a short moment
-              await new Promise(r => setTimeout(r, 600));
-              if (Notification.permission !== 'granted') return result;
-            }
-
-            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-              console.warn('push-bridge: Push/ServiceWorker not supported');
-              return result;
-            }
-            const reg = await navigator.serviceWorker.ready;
-
-            // Try to get existing subscription first
-            let subscription = await reg.pushManager.getSubscription();
-            if (!subscription) {
-              // Use VAPID public key from page (do NOT change it)
-              const vapid = (typeof VAPID_PUBLIC_KEY !== 'undefined') ? VAPID_PUBLIC_KEY : window.VAPID_PUBLIC_KEY;
-              const applicationServerKey = vapid ? urlBase64ToUint8Array(vapid) : null;
-              subscription = await reg.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey
-              });
-            }
-
-            // Determine current channels from alertSelectedGames (safe typeof check)
-            const channels = (typeof alertSelectedGames !== 'undefined' && alertSelectedGames instanceof Set)
-              ? Array.from(alertSelectedGames) : [];
-
-            await saveSubscriptionToServer(subscription, channels);
-            return result;
-          } catch (e) {
-            console.warn('push-bridge: patchedTogglePushAlerts error', e);
-            try { return orig.apply(this, args); } catch(_) { return null; }
-          }
-        };
-      }
-
-      // Monkey-patch toggleAlert to update channels server-side after user action
-      if (typeof window.toggleAlert === 'function') {
-        const orig = window.toggleAlert;
-        window.toggleAlert = function patchedToggleAlert(...args) {
-          const res = orig.apply(this, args);
-          try {
-            const channels = (typeof alertSelectedGames !== 'undefined' && alertSelectedGames instanceof Set)
-              ? Array.from(alertSelectedGames) : [];
-            // fire & forget
-            updateChannelsOnServer(channels);
-          } catch (e) {
-            console.warn('push-bridge: toggleAlert patch error', e);
-          }
-          return res;
-        };
-      }
-
-      // If already subscribed and channels loaded, push channels to server
-      try {
-        if (localStorage.getItem('push_objectId')) {
-          const channels = (typeof alertSelectedGames !== 'undefined' && alertSelectedGames instanceof Set)
-            ? Array.from(alertSelectedGames) : [];
-          if (channels.length) updateChannelsOnServer(channels);
-        }
-      } catch (e) {}
-    });
-  })();
-  </script>
-
   <script>
     const BACK4APP_APP_ID = "obf7aTUggazRscBY140M2kWTRbhcuiintFMuuh7M";
     const BACK4APP_JS_KEY = "byBfXw4lc8QrxfDxzscc6KoH0oejmLubmusyGowa";
     const VAPID_PUBLIC_KEY = "BA8NXZjt4Aj2NsNFZwFQJPvNHoGdz87nVB_0MJCQdbXFMhgOmkWsd-STbCKtgPIBPrWF7-Umqrili8Ef4xS352E";
-  </script>
 
-  <script>
-    // existing in-page script (your original app code continues unchanged)
+    const ALL_SPORTS_LEAGUES = [
+      { sport: 'football', league: 'nfl' },
+      { sport: 'basketball', league: 'nba' },
+      { sport: 'baseball', league: 'mlb' },
+      { sport: 'hockey', league: 'nhl' },
+      { sport: 'mma', league: 'ufc' },
+      { sport: 'soccer', league: 'usa.1' },
+      { sport: 'soccer', league: 'eng.1' },
+      { sport: 'football', league: 'college-football' },
+      { sport: 'basketball', league: 'mens-college-basketball' }
+    ];
+
+    let currentSport = 'all';
+    let currentLeague = 'all';
+    let selectedDate = formatDateForESPN(new Date());
+    let alertSelectedGames = new Set();
+    let pinnedGames = new Set();
+    let cachedEventsList = [];
+    let isPushEnabled = false;
+
+    function formatDateForESPN(dateObj) {
+      const yyyy = dateObj.getFullYear();
+      const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(dateObj.getDate()).padStart(2, '0');
+      return `${yyyy}${mm}${dd}`;
+    }
+
+    function generateInstallationId() {
+      let id = localStorage.getItem('parse_installation_id');
+      if (!id) {
+        id = 'inst-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        localStorage.setItem('parse_installation_id', id);
+      }
+      return id;
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(err => {
+          console.warn('Service Worker registration note:', err);
+        });
+      }
+
+      setupDateScroller();
+      initPushAlertButton();
+      loadUserAlertsFromBack4App();
+      fetchScoreboard();
+      
+      setInterval(() => {
+        if (alertSelectedGames.size > 0) {
+          fetchScoreboard();
+        }
+      }, 240000);
+
+      setInterval(() => {
+        if (cachedEventsList.length > 0) {
+          renderCards(cachedEventsList);
+        }
+      }, 60000);
+    });
+
+    function initPushAlertButton() {
+      const btn = document.getElementById('pwaAlertBtn');
+      btn.onclick = togglePushAlerts;
+    }
+
+    async function togglePushAlerts() {
+      const btn = document.getElementById('pwaAlertBtn');
+      const btnText = document.getElementById('btnText');
+
+      if (!isPushEnabled) {
+        if ('Notification' in window) {
+          const permission = await Notification.requestPermission();
+          if (permission === 'granted') {
+            await subscribeUserToPush();
+          }
+        }
+        isPushEnabled = true;
+        btn.classList.add('active');
+        btnText.innerText = 'Push Alerts Active';
+      } else {
+        isPushEnabled = false;
+        btn.classList.remove('active');
+        btnText.innerText = 'Enable Push Alerts';
+      }
+    }
+
+    // --- FIXED Subscribe function: converts VAPID key and saves full PushSubscription to PushSubscription class ---
+    async function subscribeUserToPush() {
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        try {
+          // Convert base64 VAPID public key to Uint8Array
+          function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+              outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+          }
+
+          const reg = await navigator.serviceWorker.ready;
+
+          const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+          let sub = await reg.pushManager.getSubscription();
+          if (!sub) {
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey
+            });
+          }
+
+          // Save full subscription to PushSubscription class (not _Installation)
+          const installationId = generateInstallationId();
+          const body = {
+            subscription: sub,
+            installationId: installationId,
+            platform: navigator.userAgent,
+            channels: Array.from(alertSelectedGames)
+          };
+
+          await fetch('https://parseapi.back4app.com/classes/PushSubscription', {
+            method: 'POST',
+            headers: {
+              'X-Parse-Application-Id': BACK4APP_APP_ID,
+              'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(body)
+          }).then(async (r) => {
+            if (r.ok) {
+              const d = await r.json().catch(()=>null);
+              if (d && d.objectId) localStorage.setItem('push_objectId', d.objectId);
+            } else {
+              // if creation fails, try to parse response for debugging
+              try { const err = await r.text(); console.warn('PushSubscription create failed:', r.status, err); } catch(_) {}
+            }
+          }).catch(err => {
+            console.warn('Back4App PushSubscription POST error:', err);
+          });
+
+        } catch (err) {
+          console.warn('subscribeUserToPush error:', err);
+        }
+      } else {
+        console.warn('Push or ServiceWorker not supported in this browser');
+      }
+    }
+
+    // Update channels on PushSubscription object when user toggles alerts
+    async function updateChannelsOnServer() {
+      const objectId = localStorage.getItem('push_objectId');
+      if (!objectId) return;
+      try {
+        await fetch(`https://parseapi.back4app.com/classes/PushSubscription/${objectId}`, {
+          method: 'PUT',
+          headers: {
+            'X-Parse-Application-Id': BACK4APP_APP_ID,
+            'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ channels: Array.from(alertSelectedGames) })
+        });
+      } catch (e) {
+        console.warn('updateChannelsOnServer error', e);
+      }
+    }
+
+    async function syncGameAlertToBack4App(gameId, isAlertActive) {
+      try {
+        const response = await fetch('https://parseapi.back4app.com/classes/GameAlerts', {
+          method: 'POST',
+          headers: {
+            'X-Parse-Application-Id': BACK4APP_APP_ID,
+            'X-Parse-JavaScript-Key': BACK4APP_JS_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            gameId: String(gameId),
+            alertActive: isAlertActive,
+            timestamp: {
+              "__type": "Date",
+              "iso": new Date().toISOString()
+            }
+          })
+        });
+        const result = await response.json();
+        console.log('[Back4App] Sync Result:', result);
+      } catch (err) {
+        console.warn('Back4App Sync Error:', err);
+      }
+    }
+
+    async function loadUserAlertsFromBack4App() {
+      try {
+        const res = await fetch('https://parseapi.back4app.com/classes/GameAlerts?limit=100&order=-createdAt', {
+          headers: {
+            'X-Parse-Application-Id': BACK4APP_APP_ID,
+            'X-Parse-JavaScript-Key': BACK4APP_JS_KEY
+          }
+        }).then(r => r.json());
+
+        if (res && res.results) {
+          res.results.forEach(item => {
+            if (item.alertActive) {
+              alertSelectedGames.add(item.gameId);
+            }
+          });
+          if (cachedEventsList.length > 0) {
+            renderCards(cachedEventsList);
+          }
+        }
+      } catch (err) {
+        console.warn('Back4App fetch error:', err);
+      }
+    }
+
+    function setupDateScroller() {
+      const scroller = document.getElementById('dateScroller');
+      scroller.innerHTML = '';
+      const today = new Date();
+
+      for (let i = -2; i <= 4; i++) {
+        const d = new Date();
+        d.setDate(today.getDate() + i);
+        const dateFormatted = formatDateForESPN(d);
+
+        const chip = document.createElement('div');
+        chip.className = `date-chip ${i === 0 ? 'active' : ''}`;
+        chip.innerText = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        chip.onclick = () => {
+          document.querySelectorAll('.date-chip').forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          selectedDate = dateFormatted;
+          fetchScoreboard();
+        };
+        scroller.appendChild(chip);
+      }
+    }
+
+    function switchSport(sport, league, element) {
+      document.querySelectorAll('.sport-link').forEach(l => l.classList.remove('active'));
+      element.classList.add('active');
+      currentSport = sport;
+      currentLeague = league;
+      fetchScoreboard();
+    }
+
+    async function fetchScoreboard() {
+      const grid = document.getElementById('scoreboardGrid');
+      
+      try {
+        let fetchPromises = [];
+
+        if (currentSport === 'all') {
+          fetchPromises = ALL_SPORTS_LEAGUES.map(item => 
+            fetch(`https://site.api.espn.com/apis/site/v2/sports/${item.sport}/${item.league}/scoreboard?dates=${selectedDate}`)
+              .then(r => r.json())
+              .then(data => data.events || [])
+              .catch(() => [])
+          );
+        } else {
+          const espnUrl = `https://site.api.espn.com/apis/site/v2/sports/${currentSport}/${currentLeague}/scoreboard?dates=${selectedDate}`;
+          fetchPromises.push(
+            fetch(espnUrl)
+              .then(r => r.json())
+              .then(data => data.events || [])
+              .catch(() => [])
+          );
+        }
+
+        const [eventsResults] = await Promise.all([
+          Promise.all(fetchPromises),
+          typeof fetchLiveStreams === 'function' ? fetchLiveStreams() : Promise.resolve([])
+        ]);
+
+        const aggregatedEvents = eventsResults.flat();
+        cachedEventsList = aggregatedEvents;
+        
+        renderCards(aggregatedEvents);
+      } catch (err) {
+        grid.innerHTML = '<div style="color:var(--text-muted)">Failed to load schedule/scores for this date.</div>';
+      }
+    }
+
+    function getStartsInCountdown(eventDateStr) {
+      const startTime = new Date(eventDateStr);
+      const now = new Date();
+      const diffMs = startTime - now;
+
+      if (diffMs <= 0) {
+        return startTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      }
+
+      const diffMins = Math.floor(diffMs / 60000);
+      const hours = Math.floor(diffMins / 60);
+      const mins = diffMins % 60;
+
+      if (hours > 0) {
+        return `Starts in ${hours}h ${mins}m`;
+      } else {
+        return `Starts in ${mins}m`;
+      }
+    }
+
+    function renderCards(events) {
+      const grid = document.getElementById('scoreboardGrid');
+      grid.innerHTML = '';
+
+      if (!events || events.length === 0) {
+        grid.innerHTML = '<div style="color:var(--text-muted); padding: 20px;">No games scheduled for this date.</div>';
+        return;
+      }
+
+      events.sort((a, b) => {
+        const aPinned = pinnedGames.has(a.id) ? 1 : 0;
+        const bPinned = pinnedGames.has(b.id) ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+
+        const aFinal = a.status?.type?.completed ? 1 : 0;
+        const bFinal = b.status?.type?.completed ? 1 : 0;
+        return aFinal - bFinal;
+      });
+
+      events.forEach(event => {
+        const competition = event.competitions?.[0];
+        if (!competition) return;
+
+        const home = competition.competitors?.find(c => c.homeAway === 'home') || competition.competitors?.[0];
+        const away = competition.competitors?.find(c => c.homeAway === 'away') || competition.competitors?.[1];
+        
+        if (!home || !away) return;
+
+        const isCompleted = event.status?.type?.completed;
+        const isPinned = pinnedGames.has(event.id);
+        const hasAlert = alertSelectedGames.has(event.id);
+
+        const homeScore = parseInt(home.score || '0');
+        const awayScore = parseInt(away.score || '0');
+
+        let statusDisplay = '';
+        if (isCompleted) {
+          statusDisplay = 'FINAL';
+        } else if (event.status?.type?.state === 'in') {
+          statusDisplay = event.status?.type?.detail || 'LIVE';
+        } else {
+          statusDisplay = getStartsInCountdown(event.date);
+        }
+
+        const card = document.createElement('div');
+        card.className = `score-card ${isCompleted ? 'is-final' : ''}`;
+        card.onclick = (e) => {
+          if (!e.target.classList.contains('action-btn')) {
+            openModal(event, competition);
+          }
+        };
+
+        card.innerHTML = `
+          <div class="card-header">
+            <span class="status-badge">${statusDisplay}</span>
+            <div class="card-actions">
+              <button class="action-btn ${hasAlert ? 'alert-active' : ''}" onclick="toggleAlert('${event.id}', event)">
+                ${hasAlert ? 'Alert On' : 'Alert Off'}
+              </button>
+              <button class="action-btn ${isPinned ? 'pinned' : ''}" onclick="togglePin('${event.id}', event)">
+                ${isPinned ? 'Pinned' : 'Pin'}
+              </button>
+            </div>
+          </div>
+
+          <div class="team-row">
+            <div class="team-info">
+              <img class="team-logo" src="${home.team?.logo || ''}" alt="">
+              <span class="team-name">${home.team?.displayName || 'TBD'}</span>
+            </div>
+            <span class="team-score ${homeScore > awayScore && !isCompleted ? 'leading-score' : ''}">${home.score || 0}</span>
+          </div>
+
+          <div class="team-row">
+            <div class="team-info">
+              <img class="team-logo" src="${away.team?.logo || ''}" alt="">
+              <span class="team-name">${away.team?.displayName || 'TBD'}</span>
+            </div>
+            <span class="team-score ${awayScore > homeScore && !isCompleted ? 'leading-score' : ''}">${away.score || 0}</span>
+          </div>
+        `;
+
+        grid.appendChild(card);
+      });
+    }
+
+    function togglePin(id, e) {
+      e.stopPropagation();
+      if (pinnedGames.has(id)) pinnedGames.delete(id);
+      else pinnedGames.add(id);
+      fetchScoreboard();
+    }
+
+    // --- FIXED toggleAlert: now updates PushSubscription channels on server ---
+    async function toggleAlert(id, e) {
+      e.stopPropagation();
+      let isNowActive = false;
+      if (alertSelectedGames.has(id)) {
+        alertSelectedGames.delete(id);
+      } else {
+        alertSelectedGames.add(id);
+        isNowActive = true;
+      }
+      // Keep the existing GameAlerts logging
+      syncGameAlertToBack4App(id, isNowActive);
+      // Update PushSubscription.channels to reflect current selections
+      updateChannelsOnServer();
+      fetchScoreboard();
+    }
+
+    async function openModal(event, competition) {
+      const modal = document.getElementById('streamModal');
+      const title = document.getElementById('modalTitle');
+      const details = document.getElementById('modalDetails');
+      const player = document.getElementById('streamPlayer');
+
+      const home = competition.competitors?.find(c => c.homeAway === 'home') || competition.competitors?.[0];
+      const away = competition.competitors?.find(c => c.homeAway === 'away') || competition.competitors?.[1];
+
+      const homeName = home?.team?.displayName || 'Home Team';
+      const awayName = away?.team?.displayName || 'Away Team';
+
+      title.innerText = `${homeName} vs ${awayName}`;
+      player.src = "about:blank";
+
+      details.innerHTML = `
+        <div class="stat-box">
+          <div class="stat-label">Scoreboard</div>
+          <div class="stat-value">
+            <span class="${parseInt(home?.score || 0) > parseInt(away?.score || 0) ? 'leading-score' : ''}">${home?.team?.abbreviation || 'HOME'} ${home?.score || 0}</span> - 
+            <span class="${parseInt(away?.score || 0) > parseInt(home?.score || 0) ? 'leading-score' : ''}">${away?.team?.abbreviation || 'AWAY'} ${away?.score || 0}</span>
+          </div>
+        </div>
+
+        <div class="stat-box">
+          <div class="stat-label">Game Details</div>
+          <div class="stat-value" style="font-size:0.9rem; font-weight:400;">
+            ${currentSport === 'baseball' ? 'Balls / Strikes / Out Outlines' : 'In-game context stats'}
+          </div>
+        </div>
+
+        <div class="stat-box">
+          <div class="stat-label">Available Stream Sources</div>
+          <div class="sources-list" id="sourcesList">
+            <span style="color:var(--text-muted);">Searching for active streams...</span>
+          </div>
+        </div>
+      `;
+
+      modal.classList.add('active');
+
+      let matchedStream = typeof findMatchingStream === 'function' ? findMatchingStream(home?.team, away?.team) : null;
+
+      if (!matchedStream && typeof fetchLiveStreams === 'function') {
+        await fetchLiveStreams();
+        matchedStream = findMatchingStream(home?.team, away?.team);
+      }
+
+      const sourcesContainer = document.getElementById('sourcesList');
+
+      if (matchedStream && matchedStream.sources && matchedStream.sources.length > 0) {
+        sourcesContainer.innerHTML = '';
+        matchedStream.sources.forEach((src) => {
+          const btn = document.createElement('button');
+          btn.className = 'source-btn';
+          btn.innerText = `Source ${src.source.toUpperCase()} (${src.hd ? 'HD' : 'SD'})`;
+          btn.onclick = () => loadStreamSource(src.source, src.id);
+          sourcesContainer.appendChild(btn);
+        });
+
+        loadStreamSource(matchedStream.sources[0].source, matchedStream.sources[0].id);
+      } else {
+        sourcesContainer.innerHTML = `<span style="color:var(--accent-red); font-size:0.85rem;">No active stream sources online for this game right now.</span>`;
+      }
+    }
+
+    async function loadStreamSource(source, id) {
+      const player = document.getElementById('streamPlayer');
+      const embedUrl = typeof fetchStreamEmbedUrl === 'function' ? await fetchStreamEmbedUrl(source, id) : null;
+      if (embedUrl) {
+        player.src = embedUrl;
+      }
+    }
+
+    function closeModal() {
+      const modal = document.getElementById('streamModal');
+      const player = document.getElementById('streamPlayer');
+      player.src = "";
+      modal.classList.remove('active');
+    }
   </script>
 </body>
 </html>
