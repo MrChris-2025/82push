@@ -11,12 +11,15 @@ Do not use the old App ID from your previous HTML unless that is the same Back4A
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <title>SportsHub Score Alerts</title>
+
   <link rel="manifest" href="./manifest.json" />
   <link rel="icon" href="./icon-192.png" />
   <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
 
-
-
+  <meta name="theme-color" content="#0B0E14" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -502,7 +505,7 @@ Do not use the old App ID from your previous HTML unless that is the same Back4A
       Do not use the App ID from the old HTML if it belongs to a different
       Back4App project. The installed Cloud Functions live in this project.
     */
-    const BACK4APP_APP_ID = "7QdozBIZEIT6Cvnf3M1Ic42fmXCm3tlY4cHDAA3T";
+    const BACK4APP_APP_ID = "REPLACE_WITH_THIS_PROJECT_APP_ID";
 
     const VAPID_PUBLIC_KEY =
       "BA8NXZjt4Aj2NsNFZwFQJPvNHoGdz87nVB_0MJCQdbXFMhgOmkWsd-STbCKtgPIBPrWF7-Umqrili8Ef4xS352E";
@@ -1031,8 +1034,3 @@ Do not use the old App ID from your previous HTML unless that is the same Back4A
       }, 240000);
     });
   </script>
-  
-  
-  
-  </body>
-  </html>
