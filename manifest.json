@@ -3,7 +3,7 @@
   "name": "SportsHub Score Alerts",
   "short_name": "SportsHub",
   "description": "Live sports scoreboards with selected-game push alerts.",
-  "start_url": ".",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
