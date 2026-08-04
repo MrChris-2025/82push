@@ -4,7 +4,7 @@
   "short_name": "SportsHub",
   "description": "Live sports scoreboards with selected-game push alerts.",
   "start_url": "./",
-  "scope": "./",
+  "scope": ".",
   "display": "standalone",
   "orientation": "portrait-primary",
   "theme_color": "#0B0E14",
